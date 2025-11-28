@@ -171,4 +171,27 @@ lib LibSSH
 
   # Additional constants
   SSH_KEY_CMP_PUBLIC = 1
+
+  # Public key hash types
+  SSH_PUBLICKEY_HASH_SHA1 = 0
+  SSH_PUBLICKEY_HASH_MD5 = 1
+  SSH_PUBLICKEY_HASH_SHA256 = 2
+
+  # SSH key functions
+  fun ssh_key_new = ssh_key_new() : SshKey
+  fun ssh_key_free = ssh_key_free(key : SshKey) : Void
+  fun ssh_key_type = ssh_key_type(key : SshKey) : Int32
+  fun ssh_key_type_to_char = ssh_key_type_to_char(type : Int32) : UInt8*
+  fun ssh_key_is_public = ssh_key_is_public(k : SshKey) : Int32
+  fun ssh_key_is_private = ssh_key_is_private(k : SshKey) : Int32
+  fun ssh_key_cmp = ssh_key_cmp(k1 : SshKey, k2 : SshKey, flags : Int32) : Int32
+  fun ssh_key_dup = ssh_key_dup(key : SshKey) : SshKey
+
+  # Fingerprint functions
+  fun ssh_get_publickey_hash = ssh_get_publickey_hash(key : SshKey, type : Int32, hash : UInt8**, hlen : LibC::SizeT*) : Int32
+  fun ssh_get_fingerprint_hash = ssh_get_fingerprint_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : UInt8*
+  fun ssh_print_hash = ssh_print_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : Void
+
+  # Memory management for fingerprints
+  fun ssh_string_free_char = ssh_string_free_char(str : UInt8*) : Void
 end

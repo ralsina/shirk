@@ -27,8 +27,8 @@ module Shirk
 
     # Line 61-62: (void)user; (void)userdata; - unused parameters in C
 
-    # Line 64-65: Set auth methods
-    LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PASSWORD)
+    # Line 64-65: Set auth methods - only public key
+    LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PUBLICKEY)
 
     # Line 67-71: Send banner
     if banner != nil
@@ -40,32 +40,53 @@ module Shirk
     LibSSH::SSH_AUTH_DENIED
   end
 
-  # auth_password function (lines 76-93)
-  def self.auth_password(session : LibSSH::SshSession, user : LibC::Char*, pass : LibC::Char*, userdata : Void*) : Int32
-    # Line 78: (void)userdata;
+  
+  # auth_pubkey function - handles public key authentication
+  def self.auth_pubkey(session : LibSSH::SshSession, user : LibC::Char*, pubkey : LibSSH::SshKey, signature_state : Int32, userdata : Void*) : Int32
     user_str = user ? String.new(user) : ""
-    pass_str = pass ? String.new(pass) : ""
 
-    # Line 79: printf("Authenticating user %s pwd %s\n",user, password);
-    printf("Authenticating user '%s' pwd '%s' (pass pointer: %s)\n", user_str, pass_str, pass ? "not null" : "null")
+    printf("Public key authentication attempt for user '%s' (signature_state: %d)\n", user_str, signature_state)
 
-    # Line 80-84: Check credentials
-    if user_str == USER && pass_str == PASSWORD
-      @@authenticated = 1
-      printf("Authenticated\n")
+    # signature_state: 0 = just the public key, 1 = valid signature
+    if signature_state == 0
+      printf("Public key offered, checking if we want to accept this key\n")
+
+      # Extract and print the fingerprint of the client's public key
+      if pubkey != nil
+        hash_ptr = Pointer(Pointer(UInt8)).malloc(1)
+        hash_len = Pointer(LibC::SizeT).malloc(1)
+
+        # Get SHA256 hash of the public key
+        if LibSSH.ssh_get_publickey_hash(pubkey, LibSSH::SSH_PUBLICKEY_HASH_SHA256, hash_ptr, hash_len) == LibSSH::SSH_OK
+          hash = hash_ptr.value
+          len = hash_len.value
+
+          # Convert to printable fingerprint
+          fingerprint = LibSSH.ssh_get_fingerprint_hash(LibSSH::SSH_PUBLICKEY_HASH_SHA256, hash, len)
+          if fingerprint != nil
+            fingerprint_str = String.new(fingerprint)
+            printf("Client public key SHA256 fingerprint: %s\n", fingerprint_str)
+            LibSSH.ssh_string_free_char(fingerprint)
+          end
+
+          # Clean up the hash memory
+          LibSSH.ssh_string_free_char(hash)
+        end
+      end
+
+      # For now, accept any public key to see the fingerprint
       return LibSSH::SSH_AUTH_SUCCESS
+    elsif signature_state == 1
+      printf("Public key signature is valid\n")
+      # Check if user is allowed to authenticate with this key
+      if user_str == USER
+        @@authenticated = 1
+        printf("Public key authentication successful\n")
+        return LibSSH::SSH_AUTH_SUCCESS
+      end
     end
 
-    # Line 85-90: Too many tries
-    if @@tries >= 3
-      printf("Too many authentication tries\n")
-      LibSSH.ssh_disconnect(session)
-      @@error = 1
-      return LibSSH::SSH_AUTH_DENIED
-    end
-
-    # Line 91-92: Increment tries and deny
-    @@tries += 1
+    printf("Public key authentication denied\n")
     LibSSH::SSH_AUTH_DENIED
   end
 
@@ -120,7 +141,7 @@ module Shirk
     cb = LibSSH::SshServerCallbacksStruct.new
     cb.userdata = Pointer(Void).null
     cb.auth_none_function = ->(session : LibSSH::SshSession, user : LibC::Char*, userdata : Void*) { auth_none(session, user, userdata) }
-    cb.auth_password_function = ->(session : LibSSH::SshSession, user : LibC::Char*, pass : LibC::Char*, userdata : Void*) { auth_password(session, user, pass, userdata) }
+    cb.auth_pubkey_function = ->(session : LibSSH::SshSession, user : LibC::Char*, pubkey : LibSSH::SshKey, signature_state : Int32, userdata : Void*) { auth_pubkey(session, user, pubkey, signature_state, userdata) }
     cb.channel_open_request_session_function = ->(session : LibSSH::SshSession, userdata : Void*) { new_session_channel(session, userdata) }
 
     # Line 265-267: Local variables
@@ -176,8 +197,8 @@ module Shirk
       return 1
     end
 
-    # Line 301: Set auth methods
-    LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PASSWORD)
+    # Line 301: Set auth methods - only public key
+    LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PUBLICKEY)
 
     # Line 302-303: Create and add to event loop
     mainloop = LibSSH.ssh_event_new()
