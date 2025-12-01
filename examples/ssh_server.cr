@@ -59,12 +59,25 @@ def auth_password(session : LibSSH::Session, user : UInt8*, pass : UInt8*, userd
   LibSSH::SSH_AUTH_DENIED
 end
 
-# Public key authentication callback
+# Public key authentication callback - accepts all keys and prints fingerprint
 def auth_publickey(session : LibSSH::Session, user : UInt8*, pubkey : LibSSH::Key, signature_state : UInt8, userdata : Void*) : Int32
   sdata = Box(SessionData).unbox(userdata)
   user_str = String.new(user)
   
-  puts "Pubkey auth attempt: user=#{user_str}, state=#{signature_state}"
+  # Get key fingerprint
+  hash = Pointer(UInt8).null
+  hlen = 0_u64
+  if LibSSH.ssh_get_publickey_hash(pubkey, LibSSH::SSH_PUBLICKEY_HASH_SHA256, pointerof(hash), pointerof(hlen)) == LibSSH::SSH_OK
+    fingerprint_ptr = LibSSH.ssh_get_fingerprint_hash(LibSSH::SSH_PUBLICKEY_HASH_SHA256, hash, hlen)
+    if fingerprint_ptr
+      fingerprint = String.new(fingerprint_ptr)
+      puts "Pubkey auth: user=#{user_str}, fingerprint=#{fingerprint}"
+      LibC.free(fingerprint_ptr.as(Void*))
+    end
+    LibSSH.ssh_clean_pubkey_hash(pointerof(hash))
+  else
+    puts "Pubkey auth: user=#{user_str}, state=#{signature_state} (could not get fingerprint)"
+  end
   
   # If no signature yet, just say we accept this type of key
   if signature_state == LibSSH::SSH_PUBLICKEY_STATE_NONE
@@ -76,45 +89,10 @@ def auth_publickey(session : LibSSH::Session, user : UInt8*, pubkey : LibSSH::Ke
     return LibSSH::SSH_AUTH_DENIED
   end
   
-  # Check authorized_keys file
-  return LibSSH::SSH_AUTH_DENIED if Config.authorized_keys.empty?
-  
-  begin
-    File.each_line(Config.authorized_keys) do |line|
-      line = line.strip
-      next if line.empty? || line.starts_with?('#')
-      
-      # Parse: key_type base64_key [comment]
-      parts = line.split(' ', 3)
-      next if parts.size < 2
-      
-      key_type_name = parts[0]
-      key_base64 = parts[1]
-      
-      # Get key type
-      key_type = LibSSH.ssh_key_type_from_name(key_type_name.to_unsafe)
-      next if key_type < 0
-      
-      # Import the key
-      imported_key = Pointer(Void).null.as(LibSSH::Key)
-      result = LibSSH.ssh_pki_import_pubkey_base64(key_base64.to_unsafe, key_type, pointerof(imported_key))
-      next if result != LibSSH::SSH_OK
-      
-      # Compare keys
-      cmp_result = LibSSH.ssh_key_cmp(imported_key, pubkey, LibSSH::SSH_KEY_CMP_PUBLIC)
-      LibSSH.ssh_key_free(imported_key)
-      
-      if cmp_result == 0
-        puts "Public key authentication successful"
-        sdata.authenticated = true
-        return LibSSH::SSH_AUTH_SUCCESS
-      end
-    end
-  rescue ex
-    STDERR.puts "Error reading authorized_keys: #{ex.message}"
-  end
-  
-  LibSSH::SSH_AUTH_DENIED
+  # Accept all valid signatures
+  puts "Public key authentication successful"
+  sdata.authenticated = true
+  LibSSH::SSH_AUTH_SUCCESS
 end
 
 # Channel open callback
@@ -282,13 +260,9 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
   server_cb.auth_password_function = ->auth_password(LibSSH::Session, UInt8*, UInt8*, Void*).pointer
   server_cb.channel_open_request_session_function = ->channel_open(LibSSH::Session, Void*).pointer
   
-  # Set auth methods based on config
-  auth_methods = LibSSH::SSH_AUTH_METHOD_PASSWORD
-  if !Config.authorized_keys.empty?
-    server_cb.auth_pubkey_function = ->auth_publickey(LibSSH::Session, UInt8*, LibSSH::Key, UInt8, Void*).pointer
-    auth_methods |= LibSSH::SSH_AUTH_METHOD_PUBLICKEY
-  end
-  LibSSH.ssh_set_auth_methods(session, auth_methods)
+  # Set auth methods - always enable both password and pubkey
+  server_cb.auth_pubkey_function = ->auth_publickey(LibSSH::Session, UInt8*, LibSSH::Key, UInt8, Void*).pointer
+  LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PASSWORD | LibSSH::SSH_AUTH_METHOD_PUBLICKEY)
   
   # Register server callbacks
   LibSSH.ssh_set_server_callbacks(session, pointerof(server_cb))

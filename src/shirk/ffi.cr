@@ -152,6 +152,11 @@ lib LibSSH
   fun ssh_key_cmp(k1 : Key, k2 : Key, what : Int32) : Int32
   fun ssh_pki_import_pubkey_base64(b64 : LibC::Char*, type : Int32, key : Key*) : Int32
   fun ssh_key_type_from_name(name : LibC::Char*) : Int32
+  
+  # === Key fingerprint functions ===
+  fun ssh_get_publickey_hash(key : Key, type : Int32, hash : UInt8**, hlen : LibC::SizeT*) : Int32
+  fun ssh_get_fingerprint_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : LibC::Char*
+  fun ssh_clean_pubkey_hash(hash : UInt8**) : Void
 end
 
 # Poll event flags (from poll.h)
