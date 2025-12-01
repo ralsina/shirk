@@ -7,3 +7,16 @@
 # Libraries don't need dependency lock
 # Dependencies will be locked in applications that use them
 /shard.lock
+
+# Generated binaries
+/simple_server
+/ssh_server
+/ssh_server_cr
+/ssh_server_cb
+
+# SSH keys (generate your own)
+ssh_host_*
+authorized_keys
+
+# Python virtualenv
+/.venv/

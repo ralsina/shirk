@@ -1,75 +1,109 @@
 # Shirk
 
-Shirk is an experiment in wrapping **libssh** with Crystal. It contains both
-direct translations of the C sample servers and a higher-level API that makes
-writing echo-style SSH services straightforward.
+A Crystal library for building SSH servers using libssh. Provides both low-level FFI bindings and a high-level callback-based API.
 
-## High-level server API
+## Requirements
 
-`Shirk::SshServer` (defined in `src/shirk/server_simple.cr`) is a thin wrapper
-around libssh that keeps all callback structs, session state, and channel
-handlers on the Crystal side. You only need to inherit from `Shirk::SshServer`
-and override the hooks you care about:
+- Crystal 1.0+
+- libssh (install via your package manager)
+
+## Installation
+
+Add to your `shard.yml`:
+
+```yaml
+dependencies:
+  shirk:
+    github: ralsina/shirk
+```
+
+## High-Level API
+
+The `Shirk::Server` class provides a clean callback-based interface:
 
 ```crystal
-class TestServer < Shirk::SshServer
-  def initialize
-    super(host_key: "/etc/ssh/ssh_host_rsa_key", port: 8888)
-  end
+require "shirk"
 
-  def auth_publickey(session_id, username, fingerprint, signature_state)
-    puts "[#{session_id}] #{username} => #{fingerprint} (state #{signature_state})"
-    signature_state == 1
-  end
+server = Shirk::Server.new(
+  host: "0.0.0.0",
+  port: 2222,
+  host_key: "ssh_host_rsa_key"
+)
 
-  def on_channel_data(session_id, channel_id, data)
-    puts "[#{session_id}] #{data.size} bytes"
-    super # default implementation echoes the data
-  end
+# Public key authentication - receives SHA256 fingerprint
+server.on_auth_pubkey do |user, fingerprint|
+  puts "Key auth: #{user} with #{fingerprint}"
+  true  # accept all keys
 end
 
-TestServer.new.start
-sleep
+# Password authentication
+server.on_auth_password do |user, password|
+  user == "admin" && password == "secret"
+end
+
+# Handle exec requests
+server.on_exec do |ctx|
+  puts "Command: #{ctx.command}"
+  ctx.write("Hello, #{ctx.user}!\n")
+  ctx.write_stderr("No errors\n")
+  0  # exit code
+end
+
+server.run
 ```
 
-The class takes care of:
+### ExecContext
 
-- Owning and initializing `ssh_server_callbacks_struct` /
-  `ssh_channel_callbacks_struct` so libssh never dereferences freed memory.
-- Boxing the Crystal receiver once and reusing the pointer across callbacks.
-- Extracting and printing the client public-key fingerprint during auth.
-- Driving the libssh event loop until both authentication and channel
-  creation succeed, then echoing data back to the client by default.
+The `on_exec` callback receives an `ExecContext` with:
 
-See `examples/simple_high_level.cr` for a complete runnable server using this
-API. Run it with:
+- `ctx.command` - the command string
+- `ctx.user` - authenticated username  
+- `ctx.write(data)` - write to stdout
+- `ctx.write_stderr(data)` - write to stderr
+- `ctx.read(max_bytes)` - read from stdin
+- Return value is the exit code
+
+### Features
+
+- **Fork model** - each connection runs in a child process for isolation
+- **Password auth** via `on_auth_password` callback
+- **Public key auth** via `on_auth_pubkey` callback (receives SHA256 fingerprint)
+- **Exec handling** with proper stdout/stderr/exit status
+- **Shell support** via `on_shell` callback (optional)
+
+## Low-Level API
+
+For more control, use the FFI bindings directly. See `examples/ssh_server.cr` for a complete example that closely follows the libssh C API.
+
+## Examples
+
+### Simple Server
 
 ```shell
-crystal run examples/simple_high_level.cr
+crystal build examples/simple_server.cr -o simple_server
+./simple_server
 ```
 
-Then connect via SSH (e.g. `ssh -p 8888 myuser@localhost`) and watch the
-server log the fingerprint and echo your keystrokes.
+Test with:
+```shell
+ssh -p 2222 admin@localhost  # password: secret
+# or with Python
+python3 -c "import paramiko; c=paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy()); c.connect('localhost',2222,username='admin',password='secret'); print(c.exec_command('whoami')[1].read())"
+```
 
-## Low-level sample
+### Generate Host Key
 
-`examples/samplesshd-cb.cr` is a nearly line-for-line translation of the
-upstream libssh callback sample. It is useful for checking behavior against the
-original C implementation.
+```shell
+ssh-keygen -t rsa -b 2048 -f ssh_host_rsa_key -N ""
+```
 
 ## Development
 
-Clone the repository and install dependencies:
-
 ```shell
 shards install
+crystal spec
+crystal build examples/simple_server.cr
 ```
-
-Useful commands:
-
-- `crystal build examples/simple_high_level.cr`
-- `crystal run examples/simple_high_level.cr`
-- `crystal spec`
 
 ## Contributing
 
