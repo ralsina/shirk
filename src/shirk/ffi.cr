@@ -1,197 +1,161 @@
+# Minimal libssh FFI bindings - following ssh_server.c closely
+#
+# This is a fresh start, binding only what's needed for a working SSH server
+# using the fork model from ssh_server.c (WITH_FORK).
+
 @[Link("ssh")]
 lib LibSSH
-  # Basic types
-  type SshSession = Void*
-  type SshBind = Void*
-  type SshChannel = Void*
-  type SshMessage = Void*
-  type SshEvent = Void*
-  type SshKey = Void*
+  # === Types ===
+  type Session = Void*
+  type Bind = Void*
+  type Channel = Void*
+  type Event = Void*
+  type Key = Void*
 
-  # Error codes
-  SSH_OK = 0
+  alias SocketT = Int32
+
+  # === Return codes ===
+  SSH_OK    =  0
   SSH_ERROR = -1
   SSH_AGAIN = -2
-  SSH_EOF = -127
+  SSH_EOF   = -127
 
-  # Authentication methods
-  SSH_AUTH_METHOD_UNKNOWN = 0
-  SSH_AUTH_METHOD_NONE = 1
-  SSH_AUTH_METHOD_PASSWORD = 2
-  SSH_AUTH_METHOD_PUBLICKEY = 4
-  SSH_AUTH_METHOD_HOSTBASED = 8
-  SSH_AUTH_METHOD_INTERACTIVE = 16
-  SSH_AUTH_METHOD_GSSAPI_MIC = 32
-  SSH_AUTH_METHOD_GSSAPI_AUTH = 64
-
-  # Authentication results
+  # === Auth return codes ===
   SSH_AUTH_SUCCESS = 0
-  SSH_AUTH_DENIED = -1
-  SSH_AUTH_PARTIAL = -2
-  SSH_AUTH_INFO = -3
-  SSH_AUTH_AGAIN = -4
-  SSH_AUTH_ERROR = -5
+  SSH_AUTH_DENIED  = 1
+  SSH_AUTH_PARTIAL = 2
+  SSH_AUTH_INFO    = 3
+  SSH_AUTH_AGAIN   = 4
+  SSH_AUTH_ERROR   = -1
 
-  # Message types
-  SSH_REQUEST_AUTH = 1
-  SSH_REQUEST_CHANNEL_OPEN = 2
-  SSH_REQUEST_CHANNEL = 3
-  SSH_REQUEST_SERVICE = 4
-  SSH_REQUEST_GLOBAL = 5
+  # === Auth methods ===
+  SSH_AUTH_METHOD_UNKNOWN     = 0x0000
+  SSH_AUTH_METHOD_NONE        = 0x0001
+  SSH_AUTH_METHOD_PASSWORD    = 0x0002
+  SSH_AUTH_METHOD_PUBLICKEY   = 0x0004
+  SSH_AUTH_METHOD_HOSTBASED   = 0x0008
+  SSH_AUTH_METHOD_INTERACTIVE = 0x0010
+  SSH_AUTH_METHOD_GSSAPI_MIC  = 0x0020
 
-  # SSH bind options (from enum ssh_bind_options_e)
-  SSH_BIND_OPTIONS_BINDADDR = 0
-  SSH_BIND_OPTIONS_BINDPORT = 1
-  SSH_BIND_OPTIONS_BINDPORT_STR = 2
-  SSH_BIND_OPTIONS_HOSTKEY = 3
-  SSH_BIND_OPTIONS_DSAKEY = 4  # deprecated
-  SSH_BIND_OPTIONS_RSAKEY = 5  # deprecated
-  SSH_BIND_OPTIONS_BANNER = 6
-  SSH_BIND_OPTIONS_LOG_VERBOSITY = 7
+  # === Session status flags ===
+  SSH_CLOSED        = 0x01
+  SSH_READ_PENDING  = 0x02
+  SSH_CLOSED_ERROR  = 0x04
+  SSH_WRITE_PENDING = 0x08
+
+  # === Bind options ===
+  SSH_BIND_OPTIONS_BINDADDR          = 0
+  SSH_BIND_OPTIONS_BINDPORT          = 1
+  SSH_BIND_OPTIONS_BINDPORT_STR      = 2
+  SSH_BIND_OPTIONS_HOSTKEY           = 3
+  SSH_BIND_OPTIONS_DSAKEY            = 4
+  SSH_BIND_OPTIONS_RSAKEY            = 5
+  SSH_BIND_OPTIONS_BANNER            = 6
+  SSH_BIND_OPTIONS_LOG_VERBOSITY     = 7
   SSH_BIND_OPTIONS_LOG_VERBOSITY_STR = 8
-  SSH_BIND_OPTIONS_ECDSAKEY = 9  # deprecated
-  SSH_BIND_OPTIONS_IMPORT_KEY = 10
+  SSH_BIND_OPTIONS_ECDSAKEY          = 9
+  SSH_BIND_OPTIONS_IMPORT_KEY        = 10
 
-  # Channel request types
-  SSH_CHANNEL_REQUEST_PTY = 0
-  SSH_CHANNEL_REQUEST_EXEC = 1
-  SSH_CHANNEL_REQUEST_SHELL = 2
-  SSH_CHANNEL_REQUEST_SUBSYSTEM = 3
-  SSH_CHANNEL_REQUEST_WINDOW_CHANGE = 4
-  SSH_CHANNEL_REQUEST_X11 = 5
-  SSH_CHANNEL_REQUEST_SIGNAL = 6
-
-  # Initialize libssh
-  fun ssh_init = ssh_init() : Int32
-  fun ssh_finalize = ssh_finalize() : Int32
-
-  # SSH bind functions
-  fun ssh_bind_new = ssh_bind_new() : SshBind
-  fun ssh_bind_free = ssh_bind_free(ssh_bind : SshBind) : Void
-  fun ssh_bind_options_set = ssh_bind_options_set(ssh_bind : SshBind, type : Int32, value : Void*) : Int32
-  fun ssh_bind_listen = ssh_bind_listen(ssh_bind : SshBind) : Int32
-  fun ssh_bind_accept = ssh_bind_accept(ssh_bind : SshBind, session : SshSession) : Int32
-
-  # SSH session functions
-  fun ssh_new = ssh_new() : SshSession
-  fun ssh_free = ssh_free(session : SshSession) : Void
-  fun ssh_disconnect = ssh_disconnect(session : SshSession) : Void
-  fun ssh_handle_key_exchange = ssh_handle_key_exchange(session : SshSession) : Int32
-  fun ssh_set_auth_methods = ssh_set_auth_methods(session : SshSession, auth_methods : Int32) : Int32
-
-  # Message functions
-  fun ssh_message_get = ssh_message_get(session : SshSession) : SshMessage
-  fun ssh_message_type = ssh_message_type(msg : SshMessage) : Int32
-  fun ssh_message_subtype = ssh_message_subtype(msg : SshMessage) : Int32
-  fun ssh_message_free = ssh_message_free(msg : SshMessage) : Void
-
-  # Authentication message functions
-  fun ssh_message_auth_user = ssh_message_auth_user(msg : SshMessage) : UInt8*
-  fun ssh_message_auth_password = ssh_message_auth_password(msg : SshMessage) : UInt8*
-  fun ssh_message_auth_reply_success = ssh_message_auth_reply_success(msg : SshMessage) : Int32
-  fun ssh_message_auth_reply_failure = ssh_message_auth_reply_failure(msg : SshMessage, partial_methods : Int32) : Int32
-
-  # Channel functions
-  fun ssh_channel_new = ssh_channel_new(session : SshSession) : SshChannel
-  fun ssh_channel_free = ssh_channel_free(channel : SshChannel) : Void
-  fun ssh_channel_open_session = ssh_channel_open_session(channel : SshChannel) : Int32
-  fun ssh_channel_request_pty = ssh_channel_request_pty(channel : SshChannel) : Int32
-  fun ssh_channel_request_pty_size = ssh_channel_request_pty_size(channel : SshChannel, term : UInt8*, col : Int32, row : Int32) : Int32
-  fun ssh_channel_request_shell = ssh_channel_request_shell(channel : SshChannel) : Int32
-  fun ssh_channel_read = ssh_channel_read(channel : SshChannel, buffer : UInt8*, count : UInt32, is_stderr : Int32) : Int32
-  fun ssh_channel_write = ssh_channel_write(channel : SshChannel, buffer : UInt8*, count : UInt32) : Int32
-  fun ssh_channel_send_eof = ssh_channel_send_eof(channel : SshChannel) : Int32
-  fun ssh_channel_close = ssh_channel_close(channel : SshChannel) : Int32
-  fun ssh_channel_is_eof = ssh_channel_is_eof(channel : SshChannel) : Int32
-
-  # Event functions
-  fun ssh_event_new = ssh_event_new() : SshEvent
-  fun ssh_event_free = ssh_event_free(event : SshEvent) : Void
-  fun ssh_event_add_session = ssh_event_add_session(event : SshEvent, session : SshSession) : Int32
-  fun ssh_event_dopoll = ssh_event_dopoll(event : SshEvent, timeout : Int32) : Int32
-
-  # Error handling
-  fun ssh_get_error = ssh_get_error(session : SshSession) : UInt8*
-
-  # Callback structures - exact match to libssh headers
-
-  # Server callback structure (lines 333-378 from callbacks.h)
-  struct SshServerCallbacksStruct
-    size : LibC::SizeT                                    # line 335: size_t size
-    userdata : Void*                                      # line 339: void *userdata
-    auth_password_function : (SshSession, LibC::Char*, LibC::Char*, Void*) -> Int32  # line 343: ssh_auth_password_callback
-    auth_none_function : (SshSession, LibC::Char*, Void*) -> Int32                   # line 348: ssh_auth_none_callback
-    auth_gssapi_mic_function : (SshSession, LibC::Char*, LibC::Char*, Void*) -> Int32 # line 353: ssh_auth_gssapi_mic_callback
-    auth_pubkey_function : (SshSession, LibC::Char*, SshKey, Int32, Void*) -> Int32   # line 358: ssh_auth_pubkey_callback
-    service_request_function : (SshSession, LibC::Char*, Void*) -> Int32               # line 363: ssh_service_request_callback
-    channel_open_request_session_function : (SshSession, Void*) -> SshChannel         # line 367: ssh_channel_open_request_session_callback
-    gssapi_select_oid_function : (SshSession, LibC::Char*, Int32, SshString, Void*) -> SshString  # line 371: ssh_gssapi_select_oid_callback
-    gssapi_accept_sec_ctx_function : (SshSession, SshString, SshString*, Void*) -> Int32          # line 374: ssh_gssapi_accept_sec_ctx_callback
-    gssapi_verify_mic_function : (SshSession, SshString, Void*, LibC::SizeT, Void*) -> Int32       # line 377: ssh_gssapi_verify_mic_callback
-  end
-
-  # Channel callback structure (lines 850-925 from callbacks.h)
-  struct SshChannelCallbacksStruct
-    size : LibC::SizeT                                    # line 852: size_t size
-    userdata : Void*                                      # line 856: void *userdata
-    channel_data_function : (SshSession, SshChannel, Void*, UInt32, Int32, Void*) -> Int32          # line 860: ssh_channel_data_callback
-    channel_eof_function : (SshSession, SshChannel, Void*) -> Void                                     # line 864: ssh_channel_eof_callback
-    channel_close_function : (SshSession, SshChannel, Void*) -> Void                                  # line 868: ssh_channel_close_callback
-    channel_signal_function : (SshSession, SshChannel, LibC::Char*, Void*) -> Void                    # line 872: ssh_channel_signal_callback
-    channel_exit_status_function : (SshSession, SshChannel, Int32, Void*) -> Void                     # line 876: ssh_channel_exit_status_callback
-    channel_exit_signal_function : (SshSession, SshChannel, LibC::Char*, Int32, LibC::Char*, LibC::Char*, Void*) -> Void  # line 880: ssh_channel_exit_signal_callback
-    channel_pty_request_function : (SshSession, SshChannel, LibC::Char*, Int32, Int32, Int32, Int32, Void*) -> Int32  # line 884: ssh_channel_pty_request_callback
-    channel_shell_request_function : (SshSession, SshChannel, Void*) -> Int32                         # line 888: ssh_channel_shell_request_callback
-    channel_auth_agent_req_function : (SshSession, SshChannel, Void*) -> Void                          # line 892: ssh_channel_auth_agent_req_callback
-    channel_x11_req_function : (SshSession, SshChannel, Int32, LibC::Char*, LibC::Char*, UInt32, Void*) -> Void  # line 896: ssh_channel_x11_req_callback
-    channel_pty_window_change_function : (SshSession, SshChannel, Int32, Int32, Int32, Int32, Void*) -> Int32      # line 900: ssh_channel_pty_window_change_callback
-    channel_exec_request_function : (SshSession, SshChannel, LibC::Char*, Void*) -> Int32                           # line 904: ssh_channel_exec_request_callback
-    channel_env_request_function : (SshSession, SshChannel, LibC::Char*, LibC::Char*, Void*) -> Int32                # line 908: ssh_channel_env_request_callback
-    channel_subsystem_request_function : (SshSession, SshChannel, LibC::Char*, Void*) -> Int32                       # line 912: ssh_channel_subsystem_request_callback
-    channel_write_wontblock_function : (SshSession, SshChannel, UInt32, Void*) -> Int32                              # line 916: ssh_channel_write_wontblock_callback
-    channel_open_response_function : (SshSession, SshChannel, Bool, Void*) -> Void                                   # line 920: ssh_channel_open_resp_callback
-    channel_request_response_function : (SshSession, SshChannel, Void*) -> Void                                      # line 924: ssh_channel_request_resp_callback
-  end
-
-  # Callback functions
-  fun ssh_callbacks_init = ssh_callbacks_init(cbs : Void*) : Void
-  fun ssh_set_server_callbacks = ssh_set_server_callbacks(session : SshSession, cbs : SshServerCallbacksStruct*) : Int32
-  fun ssh_set_channel_callbacks = ssh_set_channel_callbacks(channel : SshChannel, cbs : SshChannelCallbacksStruct*) : Int32
-
-  # Additional callback functions for ssh_server.c
-  fun ssh_channel_write_stderr = ssh_channel_write_stderr(channel : SshChannel, data : UInt8*, len : UInt32) : Int32
-
-  # String handling
-  type SshString = Void*
-  fun ssh_string_from_char = ssh_string_from_char(str : UInt8*) : SshString
-  fun ssh_string_free = ssh_string_free(str : SshString) : Void
-  fun ssh_send_issue_banner = ssh_send_issue_banner(session : SshSession, banner : SshString) : Int32
-
-  # SSH constants already defined above
-
-  # Additional constants
-  SSH_KEY_CMP_PUBLIC = 1
-
-  # Public key hash types
-  SSH_PUBLICKEY_HASH_SHA1 = 0
-  SSH_PUBLICKEY_HASH_MD5 = 1
+  # === Public key hash types ===
+  SSH_PUBLICKEY_HASH_SHA1   = 0
+  SSH_PUBLICKEY_HASH_MD5    = 1
   SSH_PUBLICKEY_HASH_SHA256 = 2
 
-  # SSH key functions
-  fun ssh_key_new = ssh_key_new() : SshKey
-  fun ssh_key_free = ssh_key_free(key : SshKey) : Void
-  fun ssh_key_type = ssh_key_type(key : SshKey) : Int32
-  fun ssh_key_type_to_char = ssh_key_type_to_char(type : Int32) : UInt8*
-  fun ssh_key_is_public = ssh_key_is_public(k : SshKey) : Int32
-  fun ssh_key_is_private = ssh_key_is_private(k : SshKey) : Int32
-  fun ssh_key_cmp = ssh_key_cmp(k1 : SshKey, k2 : SshKey, flags : Int32) : Int32
-  fun ssh_key_dup = ssh_key_dup(key : SshKey) : SshKey
+  # === Public key state (for auth callback) ===
+  SSH_PUBLICKEY_STATE_NONE  = 0
+  SSH_PUBLICKEY_STATE_VALID = 1
 
-  # Fingerprint functions
-  fun ssh_get_publickey_hash = ssh_get_publickey_hash(key : SshKey, type : Int32, hash : UInt8**, hlen : LibC::SizeT*) : Int32
-  fun ssh_get_fingerprint_hash = ssh_get_fingerprint_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : UInt8*
-  fun ssh_print_hash = ssh_print_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : Void
+  # === Key comparison flags ===
+  SSH_KEY_CMP_PUBLIC = 0
 
-  # Memory management for fingerprints
-  fun ssh_string_free_char = ssh_string_free_char(str : UInt8*) : Void
+  # === Server callbacks struct (matches libssh server.h lines 72-128) ===
+  # Fields must match exact order in C struct
+  struct ServerCallbacksStruct
+    size : LibC::SizeT
+    userdata : Void*
+    auth_password_function : Void*
+    auth_none_function : Void*
+    auth_gssapi_mic_function : Void*
+    auth_pubkey_function : Void*
+    service_request_function : Void*
+    channel_open_request_session_function : Void*
+    gssapi_select_oid_function : Void*
+    gssapi_accept_sec_ctx_function : Void*
+    gssapi_verify_mic_function : Void*
+  end
+
+  # === Channel callbacks struct (matches libssh callbacks.h lines 850-925) ===
+  struct ChannelCallbacksStruct
+    size : LibC::SizeT
+    userdata : Void*
+    channel_data_function : Void*
+    channel_eof_function : Void*
+    channel_close_function : Void*
+    channel_signal_function : Void*
+    channel_exit_status_function : Void*
+    channel_exit_signal_function : Void*
+    channel_pty_request_function : Void*
+    channel_shell_request_function : Void*
+    channel_auth_agent_req_function : Void*
+    channel_x11_req_function : Void*
+    channel_pty_window_change_function : Void*
+    channel_exec_request_function : Void*
+    channel_env_request_function : Void*
+    channel_subsystem_request_function : Void*
+    channel_write_wontblock_function : Void*
+  end
+
+  # === Core functions ===
+  fun ssh_init : Int32
+  fun ssh_finalize : Int32
+
+  # === Bind functions ===
+  fun ssh_bind_new : Bind
+  fun ssh_bind_free(bind : Bind) : Void
+  fun ssh_bind_options_set(bind : Bind, type : Int32, value : Void*) : Int32
+  fun ssh_bind_listen(bind : Bind) : Int32
+  fun ssh_bind_accept(bind : Bind, session : Session) : Int32
+
+  # === Session functions ===
+  fun ssh_new : Session
+  fun ssh_free(session : Session) : Void
+  fun ssh_disconnect(session : Session) : Void
+  fun ssh_handle_key_exchange(session : Session) : Int32
+  fun ssh_get_error(session : Void*) : LibC::Char*
+  fun ssh_get_status(session : Session) : Int32
+  fun ssh_set_auth_methods(session : Session, methods : Int32) : Int32
+  fun ssh_set_server_callbacks(session : Session, cb : ServerCallbacksStruct*) : Int32
+
+  # === Channel functions ===
+  fun ssh_channel_new(session : Session) : Channel
+  fun ssh_channel_free(channel : Channel) : Void
+  fun ssh_channel_close(channel : Channel) : Int32
+  fun ssh_channel_send_eof(channel : Channel) : Int32
+  fun ssh_channel_is_open(channel : Channel) : Int32
+  fun ssh_channel_is_eof(channel : Channel) : Int32
+  fun ssh_channel_read(channel : Channel, dest : Void*, count : UInt32, is_stderr : Int32) : Int32
+  fun ssh_channel_write(channel : Channel, data : Void*, len : UInt32) : Int32
+  fun ssh_channel_write_stderr(channel : Channel, data : Void*, len : UInt32) : Int32
+  fun ssh_channel_request_send_exit_status(channel : Channel, status : Int32) : Int32
+  fun ssh_set_channel_callbacks(channel : Channel, cb : ChannelCallbacksStruct*) : Int32
+
+  # === Event functions ===
+  fun ssh_event_new : Event
+  fun ssh_event_free(event : Event) : Void
+  fun ssh_event_add_session(event : Event, session : Session) : Int32
+  fun ssh_event_add_fd(event : Event, fd : SocketT, events : LibC::Short, cb : Void*, userdata : Void*) : Int32
+  fun ssh_event_remove_fd(event : Event, fd : SocketT) : Int32
+  fun ssh_event_dopoll(event : Event, timeout : Int32) : Int32
+
+  # === Key functions (for pubkey auth) ===
+  fun ssh_key_free(key : Key) : Void
+  fun ssh_key_cmp(k1 : Key, k2 : Key, what : Int32) : Int32
+  fun ssh_pki_import_pubkey_base64(b64 : LibC::Char*, type : Int32, key : Key*) : Int32
+  fun ssh_key_type_from_name(name : LibC::Char*) : Int32
 end
+
+# Poll event flags (from poll.h)
+POLLIN  = 0x0001_i16
+POLLOUT = 0x0004_i16
+POLLERR = 0x0008_i16
+POLLHUP = 0x0010_i16
