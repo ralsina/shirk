@@ -15,6 +15,7 @@ module Config
   class_property bind_addr : String = "127.0.0.1"
   class_property username : String = "myuser"
   class_property password : String = "mypassword"
+  class_property authorized_keys : String = ""
 end
 
 # === Data structures matching C structs ===
@@ -55,6 +56,64 @@ def auth_password(session : LibSSH::Session, user : UInt8*, pass : UInt8*, userd
   
   sdata.auth_attempts += 1
   puts "Authentication failed (attempt #{sdata.auth_attempts})"
+  LibSSH::SSH_AUTH_DENIED
+end
+
+# Public key authentication callback
+def auth_publickey(session : LibSSH::Session, user : UInt8*, pubkey : LibSSH::Key, signature_state : UInt8, userdata : Void*) : Int32
+  sdata = Box(SessionData).unbox(userdata)
+  user_str = String.new(user)
+  
+  puts "Pubkey auth attempt: user=#{user_str}, state=#{signature_state}"
+  
+  # If no signature yet, just say we accept this type of key
+  if signature_state == LibSSH::SSH_PUBLICKEY_STATE_NONE
+    return LibSSH::SSH_AUTH_SUCCESS
+  end
+  
+  # Signature must be valid
+  if signature_state != LibSSH::SSH_PUBLICKEY_STATE_VALID
+    return LibSSH::SSH_AUTH_DENIED
+  end
+  
+  # Check authorized_keys file
+  return LibSSH::SSH_AUTH_DENIED if Config.authorized_keys.empty?
+  
+  begin
+    File.each_line(Config.authorized_keys) do |line|
+      line = line.strip
+      next if line.empty? || line.starts_with?('#')
+      
+      # Parse: key_type base64_key [comment]
+      parts = line.split(' ', 3)
+      next if parts.size < 2
+      
+      key_type_name = parts[0]
+      key_base64 = parts[1]
+      
+      # Get key type
+      key_type = LibSSH.ssh_key_type_from_name(key_type_name.to_unsafe)
+      next if key_type < 0
+      
+      # Import the key
+      imported_key = Pointer(Void).null.as(LibSSH::Key)
+      result = LibSSH.ssh_pki_import_pubkey_base64(key_base64.to_unsafe, key_type, pointerof(imported_key))
+      next if result != LibSSH::SSH_OK
+      
+      # Compare keys
+      cmp_result = LibSSH.ssh_key_cmp(imported_key, pubkey, LibSSH::SSH_KEY_CMP_PUBLIC)
+      LibSSH.ssh_key_free(imported_key)
+      
+      if cmp_result == 0
+        puts "Public key authentication successful"
+        sdata.authenticated = true
+        return LibSSH::SSH_AUTH_SUCCESS
+      end
+    end
+  rescue ex
+    STDERR.puts "Error reading authorized_keys: #{ex.message}"
+  end
+  
   LibSSH::SSH_AUTH_DENIED
 end
 
@@ -223,8 +282,13 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
   server_cb.auth_password_function = ->auth_password(LibSSH::Session, UInt8*, UInt8*, Void*).pointer
   server_cb.channel_open_request_session_function = ->channel_open(LibSSH::Session, Void*).pointer
   
-  # Set auth methods
-  LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PASSWORD)
+  # Set auth methods based on config
+  auth_methods = LibSSH::SSH_AUTH_METHOD_PASSWORD
+  if !Config.authorized_keys.empty?
+    server_cb.auth_pubkey_function = ->auth_publickey(LibSSH::Session, UInt8*, LibSSH::Key, UInt8, Void*).pointer
+    auth_methods |= LibSSH::SSH_AUTH_METHOD_PUBLICKEY
+  end
+  LibSSH.ssh_set_auth_methods(session, auth_methods)
   
   # Register server callbacks
   LibSSH.ssh_set_server_callbacks(session, pointerof(server_cb))
@@ -382,6 +446,10 @@ OptionParser.parse do |parser|
   
   parser.on("-P PASS", "--pass=PASS", "Expected password") do |p|
     Config.password = p
+  end
+  
+  parser.on("-a FILE", "--authorizedkeys=FILE", "Authorized keys file for pubkey auth") do |f|
+    Config.authorized_keys = f
   end
   
   parser.on("-h", "--help", "Show help") do
