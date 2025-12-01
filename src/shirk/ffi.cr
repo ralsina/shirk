@@ -125,6 +125,7 @@ lib LibSSH
   fun ssh_get_status(session : Session) : Int32
   fun ssh_set_auth_methods(session : Session, methods : Int32) : Int32
   fun ssh_set_server_callbacks(session : Session, cb : ServerCallbacksStruct*) : Int32
+  fun ssh_blocking_flush(session : Session, timeout : Int32) : Int32
 
   # === Channel functions ===
   fun ssh_channel_new(session : Session) : Channel
