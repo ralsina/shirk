@@ -52,6 +52,9 @@ module Shirk
     property pending_command : String = ""
     property pending_handler : Symbol = :none  # :none, :exec, :shell
     property handler_called : Bool = false
+    # Stdin timeout: if no data received within this time, call handler with empty stdin
+    property stdin_wait_start : Time::Span? = nil
+    property stdin_received : Bool = false
 
     def initialize(@event, @session, @server)
     end
@@ -277,10 +280,14 @@ module Shirk
       child_exited = false
       handler_completed = false
       status = uninitialized Int32
+      
+      # Stdin timeout: 200ms - if no data arrives, call handler with empty stdin
+      stdin_timeout = Time::Span.new(nanoseconds: 200_000_000)
 
       loop do
-        # Use short timeout when handler is done or we have a child process
-        timeout = (cdata.handler_done || cdata.pid > 0) ? 100 : -1
+        # Use short timeout when we have a pending handler (to check stdin timeout)
+        # or when handler is done or we have a child process
+        timeout = (cdata.pending_handler != :none || cdata.handler_done || cdata.pid > 0) ? 100 : -1
 
         poll_result = LibSSH.ssh_event_dopoll(event, timeout)
 
@@ -294,6 +301,17 @@ module Shirk
           end
           LibSSH.ssh_channel_close(channel)
           break
+        end
+        
+        # Check stdin timeout for pending handlers
+        # If no stdin received within timeout, call handler with empty stdin
+        if cdata.pending_handler != :none && !cdata.handler_called
+          if start_time = cdata.stdin_wait_start
+            if !cdata.stdin_received && (Time.monotonic - start_time) > stdin_timeout
+              # Timeout elapsed with no stdin - call handler now
+              Shirk.call_pending_handler(cdata, channel)
+            end
+          end
         end
 
         # Check if handler completed and we should close
@@ -382,6 +400,7 @@ module Shirk
 
     # If we have a pending handler (exec/shell with custom handler), buffer data
     if cdata.pending_handler != :none
+      cdata.stdin_received = true
       cdata.stdin_buffer.write(bytes)
       return len.to_i
     end
@@ -399,6 +418,38 @@ module Shirk
     n
   end
 
+  # Helper to call pending handler with buffered stdin
+  def self.call_pending_handler(cdata : ChannelData, channel : LibSSH::Channel)
+    return if cdata.handler_called
+    cdata.handler_called = true
+    
+    server = cdata.server
+    cdata.stdin_buffer.rewind
+    stdin_data = cdata.stdin_buffer.gets_to_end
+    
+    ctx = ExecContext.new(channel, cdata.pending_command, cdata.user, stdin_data)
+    
+    exit_code = case cdata.pending_handler
+    when :exec
+      if handler = server.exec_handler
+        handler.call(ctx)
+      else
+        0
+      end
+    when :shell
+      if handler = server.shell_handler
+        handler.call(ctx)
+      else
+        0
+      end
+    else
+      0
+    end
+    
+    cdata.handler_exit = exit_code
+    cdata.handler_done = true
+  end
+
   # Channel EOF callback
   def self.channel_eof_cb(session : LibSSH::Session, channel : LibSSH::Channel, userdata : Void*) : Int32
     cdata = Box(ChannelData).unbox(userdata)
@@ -407,32 +458,7 @@ module Shirk
 
     # If we have a pending handler, call it now with all buffered stdin
     if cdata.pending_handler != :none && !cdata.handler_called
-      cdata.handler_called = true
-      server = cdata.server
-      cdata.stdin_buffer.rewind
-      stdin_data = cdata.stdin_buffer.gets_to_end
-      
-      ctx = ExecContext.new(channel, cdata.pending_command, cdata.user, stdin_data)
-      
-      exit_code = case cdata.pending_handler
-      when :exec
-        if handler = server.exec_handler
-          handler.call(ctx)
-        else
-          0
-        end
-      when :shell
-        if handler = server.shell_handler
-          handler.call(ctx)
-        else
-          0
-        end
-      else
-        0
-      end
-      
-      cdata.handler_exit = exit_code
-      cdata.handler_done = true
+      call_pending_handler(cdata, channel)
     end
 
     # Close child stdin when client sends EOF
@@ -452,10 +478,11 @@ module Shirk
 
     return LibSSH::SSH_ERROR if cdata.pid > 0 || cdata.handler_done
 
-    # If we have a handler, defer it until EOF (so we can collect all stdin first)
+    # If we have a handler, defer it until EOF or timeout (so we can collect stdin first)
     if server.exec_handler
       cdata.pending_command = command
       cdata.pending_handler = :exec
+      cdata.stdin_wait_start = Time.monotonic
       return LibSSH::SSH_OK
     end
 
@@ -471,10 +498,11 @@ module Shirk
 
     return LibSSH::SSH_ERROR if cdata.pid > 0 || cdata.handler_done
 
-    # If we have a handler, defer it until EOF (so we can collect all stdin first)
+    # If we have a handler, defer it until EOF or timeout (so we can collect stdin first)
     if server.shell_handler
       cdata.pending_command = ""
       cdata.pending_handler = :shell
+      cdata.stdin_wait_start = Time.monotonic
       return LibSSH::SSH_OK
     end
 

@@ -2,6 +2,32 @@
 
 A Crystal library for building SSH servers using libssh. Provides both low-level FFI bindings and a high-level callback-based API.
 
+## ⚠️ Important Limitations
+
+**This library is designed for non-interactive SSH command execution**, such as:
+
+- Remote API endpoints
+- Automated deployment commands
+- CI/CD integrations
+- Git-over-SSH servers
+
+**It is NOT suitable for:**
+
+- Interactive shells (bash, zsh, etc.)
+- Full terminal emulation (PTY)
+- Real-time streaming input/output
+- Commands that require user interaction (vim, nano, less, etc.)
+
+### Stdin Handling
+
+The high-level API (`Shirk::Server`) collects **all stdin before calling your handler**. This means:
+
+- ✅ `echo "data" | ssh host command` works - all piped data is available in `ctx.stdin`
+- ✅ `ssh host command` without stdin works - handler is called after a short timeout with empty `ctx.stdin`
+- ❌ Interactive input doesn't work - there's no way to read/write incrementally
+
+If you need more control over stdin handling, use the low-level API (see `examples/ssh_server.cr`) which provides raw callbacks for data as it arrives.
+
 ## Requirements
 
 - Crystal 1.0+
@@ -57,10 +83,10 @@ server.run
 The `on_exec` callback receives an `ExecContext` with:
 
 - `ctx.command` - the command string
-- `ctx.user` - authenticated username  
+- `ctx.user` - authenticated username
+- `ctx.stdin` - all stdin data from client (collected before handler runs)
 - `ctx.write(data)` - write to stdout
 - `ctx.write_stderr(data)` - write to stderr
-- `ctx.read(max_bytes)` - read from stdin
 - Return value is the exit code
 
 ### Features
