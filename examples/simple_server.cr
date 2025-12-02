@@ -20,7 +20,7 @@ require "../src/shirk"
 #
 # 1. on_exec: Called when client runs a command (ssh host command)
 #    - ctx.command contains the command string
-#    - ctx.read() reads stdin from client (returns "" when no more data)
+#    - ctx.stdin contains ALL stdin data (collected before handler runs)
 #    - ctx.write() sends to client stdout
 #    - ctx.write_stderr() sends to client stderr
 #    - Return value is the exit code
@@ -57,22 +57,12 @@ server.on_exec do |ctx|
   # Print the command received from the client
   ctx.write("Command: #{ctx.command}\n")
 
-  # Read all stdin until EOF
-  # ctx.read() returns "" when there's no more data
-  all_input = String::Builder.new
-  loop do
-    chunk = ctx.read(4096)
-    break if chunk.empty?
-    all_input << chunk
-  end
-
-  # Print all the input received
-  input = all_input.to_s
-  if input.empty?
+  # ctx.stdin contains ALL data the client sent (already collected)
+  if ctx.stdin.empty?
     ctx.write("No input received.\n")
   else
-    ctx.write("Input received (#{input.bytesize} bytes):\n")
-    ctx.write(input)
+    ctx.write("Input received (#{ctx.stdin.bytesize} bytes):\n")
+    ctx.write(ctx.stdin)
   end
 
   0 # Exit code
@@ -80,23 +70,14 @@ end
 
 # Handle shell requests (ssh host)
 server.on_shell do |ctx|
-  ctx.write("Shell session started. Send input and close stdin (Ctrl+D).\n")
+  ctx.write("Shell session started.\n")
 
-  # Read all stdin until EOF
-  all_input = String::Builder.new
-  loop do
-    chunk = ctx.read(4096)
-    break if chunk.empty?
-    all_input << chunk
-  end
-
-  # Print all the input received
-  input = all_input.to_s
-  if input.empty?
+  # ctx.stdin contains ALL data the client sent (already collected)
+  if ctx.stdin.empty?
     ctx.write("No input received.\n")
   else
-    ctx.write("Input received (#{input.bytesize} bytes):\n")
-    ctx.write(input)
+    ctx.write("Input received (#{ctx.stdin.bytesize} bytes):\n")
+    ctx.write(ctx.stdin)
   end
 
   0 # Exit code

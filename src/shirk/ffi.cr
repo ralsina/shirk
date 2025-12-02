@@ -135,6 +135,8 @@ lib LibSSH
   fun ssh_channel_is_open(channel : Channel) : Int32
   fun ssh_channel_is_eof(channel : Channel) : Int32
   fun ssh_channel_read(channel : Channel, dest : Void*, count : UInt32, is_stderr : Int32) : Int32
+  fun ssh_channel_read_nonblocking(channel : Channel, dest : Void*, count : UInt32, is_stderr : Int32) : Int32
+  fun ssh_channel_poll(channel : Channel, is_stderr : Int32) : Int32
   fun ssh_channel_write(channel : Channel, data : Void*, len : UInt32) : Int32
   fun ssh_channel_write_stderr(channel : Channel, data : Void*, len : UInt32) : Int32
   fun ssh_channel_request_send_exit_status(channel : Channel, status : Int32) : Int32
