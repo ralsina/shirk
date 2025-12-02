@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(shards build:*)",
+      "WebSearch"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

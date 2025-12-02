@@ -50,7 +50,7 @@ module Shirk
     property eof_received : Bool = false
     # For deferred handler execution
     property pending_command : String = ""
-    property pending_handler : Symbol = :none  # :none, :exec, :shell
+    property pending_handler : Symbol = :none # :none, :exec, :shell
     property handler_called : Bool = false
     # Stdin timeout: if no data received within this time, call handler with empty stdin
     property stdin_wait_start : Time::Span? = nil
@@ -101,6 +101,7 @@ module Shirk
     property host_key : String
     property username : String
     property password : String
+    property kex_algorithms : String
 
     @auth_password_handler : Proc(String, String, Bool)?
     @auth_pubkey_handler : Proc(String, String, Bool)?
@@ -108,7 +109,8 @@ module Shirk
     @shell_handler : Proc(ExecContext, Int32)?
 
     def initialize(@host : String, @port : Int32, @host_key : String,
-                   @username : String = "", @password : String = "")
+                   @username : String = "", @password : String = "",
+                   @kex_algorithms : String = "ml-kem-768-sha256-x25519-sha256@libssh.org:sntrup761x25519-sha512@openssh.com:curve25519-sha256@libssh.org:ecdh-sha2-nistp256:ecdh-sha2-nistp384:ecdh-sha2-nistp521:diffie-hellman-group16-sha512:diffie-hellman-group18-sha512:diffie-hellman-group14-sha256")
     end
 
     # Set password authentication handler
@@ -168,6 +170,7 @@ module Shirk
       port_str = @port.to_s
       LibSSH.ssh_bind_options_set(sshbind, LibSSH::SSH_BIND_OPTIONS_BINDPORT_STR, port_str.to_unsafe.as(Void*))
       LibSSH.ssh_bind_options_set(sshbind, LibSSH::SSH_BIND_OPTIONS_HOSTKEY, @host_key.to_unsafe.as(Void*))
+      LibSSH.ssh_bind_options_set(sshbind, LibSSH::SSH_BIND_OPTIONS_KEX_ALGORITHMS, @kex_algorithms.to_unsafe.as(Void*))
 
       if LibSSH.ssh_bind_listen(sshbind) < 0
         error = String.new(LibSSH.ssh_get_error(sshbind.as(Void*)))
@@ -280,7 +283,7 @@ module Shirk
       child_exited = false
       handler_completed = false
       status = uninitialized Int32
-      
+
       # Stdin timeout: 200ms - if no data arrives, call handler with empty stdin
       stdin_timeout = Time::Span.new(nanoseconds: 200_000_000)
 
@@ -302,7 +305,7 @@ module Shirk
           LibSSH.ssh_channel_close(channel)
           break
         end
-        
+
         # Check stdin timeout for pending handlers
         # If no stdin received within timeout, call handler with empty stdin
         if cdata.pending_handler != :none && !cdata.handler_called
@@ -422,30 +425,30 @@ module Shirk
   def self.call_pending_handler(cdata : ChannelData, channel : LibSSH::Channel)
     return if cdata.handler_called
     cdata.handler_called = true
-    
+
     server = cdata.server
     cdata.stdin_buffer.rewind
     stdin_data = cdata.stdin_buffer.gets_to_end
-    
+
     ctx = ExecContext.new(channel, cdata.pending_command, cdata.user, stdin_data)
-    
+
     exit_code = case cdata.pending_handler
-    when :exec
-      if handler = server.exec_handler
-        handler.call(ctx)
-      else
-        0
-      end
-    when :shell
-      if handler = server.shell_handler
-        handler.call(ctx)
-      else
-        0
-      end
-    else
-      0
-    end
-    
+                when :exec
+                  if handler = server.exec_handler
+                    handler.call(ctx)
+                  else
+                    0
+                  end
+                when :shell
+                  if handler = server.shell_handler
+                    handler.call(ctx)
+                  else
+                    0
+                  end
+                else
+                  0
+                end
+
     cdata.handler_exit = exit_code
     cdata.handler_done = true
   end

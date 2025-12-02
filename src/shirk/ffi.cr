@@ -15,17 +15,17 @@ lib LibSSH
   alias SocketT = Int32
 
   # === Return codes ===
-  SSH_OK    =  0
-  SSH_ERROR = -1
-  SSH_AGAIN = -2
+  SSH_OK    =    0
+  SSH_ERROR =   -1
+  SSH_AGAIN =   -2
   SSH_EOF   = -127
 
   # === Auth return codes ===
-  SSH_AUTH_SUCCESS = 0
-  SSH_AUTH_DENIED  = 1
-  SSH_AUTH_PARTIAL = 2
-  SSH_AUTH_INFO    = 3
-  SSH_AUTH_AGAIN   = 4
+  SSH_AUTH_SUCCESS =  0
+  SSH_AUTH_DENIED  =  1
+  SSH_AUTH_PARTIAL =  2
+  SSH_AUTH_INFO    =  3
+  SSH_AUTH_AGAIN   =  4
   SSH_AUTH_ERROR   = -1
 
   # === Auth methods ===
@@ -44,17 +44,18 @@ lib LibSSH
   SSH_WRITE_PENDING = 0x08
 
   # === Bind options ===
-  SSH_BIND_OPTIONS_BINDADDR          = 0
-  SSH_BIND_OPTIONS_BINDPORT          = 1
-  SSH_BIND_OPTIONS_BINDPORT_STR      = 2
-  SSH_BIND_OPTIONS_HOSTKEY           = 3
-  SSH_BIND_OPTIONS_DSAKEY            = 4
-  SSH_BIND_OPTIONS_RSAKEY            = 5
-  SSH_BIND_OPTIONS_BANNER            = 6
-  SSH_BIND_OPTIONS_LOG_VERBOSITY     = 7
-  SSH_BIND_OPTIONS_LOG_VERBOSITY_STR = 8
-  SSH_BIND_OPTIONS_ECDSAKEY          = 9
+  SSH_BIND_OPTIONS_BINDADDR          =  0
+  SSH_BIND_OPTIONS_BINDPORT          =  1
+  SSH_BIND_OPTIONS_BINDPORT_STR      =  2
+  SSH_BIND_OPTIONS_HOSTKEY           =  3
+  SSH_BIND_OPTIONS_DSAKEY            =  4
+  SSH_BIND_OPTIONS_RSAKEY            =  5
+  SSH_BIND_OPTIONS_BANNER            =  6
+  SSH_BIND_OPTIONS_LOG_VERBOSITY     =  7
+  SSH_BIND_OPTIONS_LOG_VERBOSITY_STR =  8
+  SSH_BIND_OPTIONS_ECDSAKEY          =  9
   SSH_BIND_OPTIONS_IMPORT_KEY        = 10
+  SSH_BIND_OPTIONS_KEX_ALGORITHMS    = 11
 
   # === Public key hash types ===
   SSH_PUBLICKEY_HASH_SHA1   = 0
@@ -155,7 +156,7 @@ lib LibSSH
   fun ssh_key_cmp(k1 : Key, k2 : Key, what : Int32) : Int32
   fun ssh_pki_import_pubkey_base64(b64 : LibC::Char*, type : Int32, key : Key*) : Int32
   fun ssh_key_type_from_name(name : LibC::Char*) : Int32
-  
+
   # === Key fingerprint functions ===
   fun ssh_get_publickey_hash(key : Key, type : Int32, hash : UInt8**, hlen : LibC::SizeT*) : Int32
   fun ssh_get_fingerprint_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : LibC::Char*

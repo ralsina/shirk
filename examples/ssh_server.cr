@@ -45,18 +45,18 @@ end
 # Password authentication callback
 def auth_password(session : LibSSH::Session, user : UInt8*, pass : UInt8*, userdata : Void*) : Int32
   sdata = Box(SessionData).unbox(userdata)
-  
+
   user_str = String.new(user)
   pass_str = String.new(pass)
-  
+
   puts "Auth attempt: user=#{user_str}"
-  
+
   if user_str == Config.username && pass_str == Config.password
     puts "Authentication successful"
     sdata.authenticated = true
     return LibSSH::SSH_AUTH_SUCCESS
   end
-  
+
   sdata.auth_attempts += 1
   puts "Authentication failed (attempt #{sdata.auth_attempts})"
   LibSSH::SSH_AUTH_DENIED
@@ -66,7 +66,7 @@ end
 def auth_publickey(session : LibSSH::Session, user : UInt8*, pubkey : LibSSH::Key, signature_state : UInt8, userdata : Void*) : Int32
   sdata = Box(SessionData).unbox(userdata)
   user_str = String.new(user)
-  
+
   # Get key fingerprint
   hash = Pointer(UInt8).null
   hlen = 0_u64
@@ -81,17 +81,17 @@ def auth_publickey(session : LibSSH::Session, user : UInt8*, pubkey : LibSSH::Ke
   else
     puts "Pubkey auth: user=#{user_str}, state=#{signature_state} (could not get fingerprint)"
   end
-  
+
   # If no signature yet, just say we accept this type of key
   if signature_state == LibSSH::SSH_PUBLICKEY_STATE_NONE
     return LibSSH::SSH_AUTH_SUCCESS
   end
-  
+
   # Signature must be valid
   if signature_state != LibSSH::SSH_PUBLICKEY_STATE_VALID
     return LibSSH::SSH_AUTH_DENIED
   end
-  
+
   # Accept all valid signatures
   puts "Public key authentication successful"
   sdata.authenticated = true
@@ -109,33 +109,33 @@ end
 # Channel data callback (client -> server)
 def data_function(session : LibSSH::Session, channel : LibSSH::Channel, data : Void*, len : UInt32, is_stderr : Int32, userdata : Void*) : Int32
   cdata = Box(ChannelData).unbox(userdata)
-  
+
   puts "DATA CALLBACK: len=#{len}, pid=#{cdata.pid}, stdin_fd=#{cdata.child_stdin}"
-  
+
   return 0 if len == 0
-  
+
   bytes = Slice.new(data.as(UInt8*), len.to_i)
-  
+
   # If child not spawned yet, buffer the data
   if cdata.pid < 1
     cdata.stdin_buffer.write(bytes)
     puts "Buffered #{len} bytes (total: #{cdata.stdin_buffer.size})"
     return len.to_i
   end
-  
+
   # Check if child is alive
   result = LibC.kill(cdata.pid, 0)
   if result < 0
     puts "Child is dead, dropping data"
     return 0
   end
-  
+
   # Check if stdin is still open
   if cdata.child_stdin == -1
     puts "Child stdin already closed, dropping data"
     return 0
   end
-  
+
   # Write to child's stdin
   written = LibC.write(cdata.child_stdin, bytes, len)
   puts "Wrote #{written} bytes to child stdin"
@@ -145,10 +145,10 @@ end
 # Channel EOF callback - client signals end of input
 def eof_function(session : LibSSH::Session, channel : LibSSH::Channel, userdata : Void*) : Void
   cdata = Box(ChannelData).unbox(userdata)
-  
+
   puts "EOF received from client"
   cdata.eof_received = true
-  
+
   # If child is already running, close stdin now
   if cdata.pid > 0 && cdata.child_stdin != -1
     fd = cdata.child_stdin
@@ -165,11 +165,11 @@ end
 def exec_request(session : LibSSH::Session, channel : LibSSH::Channel, command : UInt8*, userdata : Void*) : Int32
   cdata = Box(ChannelData).unbox(userdata)
   cmd = String.new(command)
-  
+
   puts "Exec request: #{cmd}"
-  
+
   return LibSSH::SSH_ERROR if cdata.pid > 0
-  
+
   # Use exec_nopty since we don't have PTY allocated
   exec_nopty(cmd, cdata)
 end
@@ -177,11 +177,11 @@ end
 # Shell request callback
 def shell_request(session : LibSSH::Session, channel : LibSSH::Channel, userdata : Void*) : Int32
   cdata = Box(ChannelData).unbox(userdata)
-  
+
   puts "Shell request"
-  
+
   return LibSSH::SSH_ERROR if cdata.pid > 0
-  
+
   # Shell without PTY - just pretend we allow it
   LibSSH::SSH_OK
 end
@@ -192,19 +192,19 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
   stdin_pipe = uninitialized StaticArray(LibC::Int, 2)
   stdout_pipe = uninitialized StaticArray(LibC::Int, 2)
   stderr_pipe = uninitialized StaticArray(LibC::Int, 2)
-  
+
   if LibC.pipe(stdin_pipe) != 0
     STDERR.puts "Failed to create stdin pipe"
     return LibSSH::SSH_ERROR
   end
-  
+
   if LibC.pipe(stdout_pipe) != 0
     LibC.close(stdin_pipe[0])
     LibC.close(stdin_pipe[1])
     STDERR.puts "Failed to create stdout pipe"
     return LibSSH::SSH_ERROR
   end
-  
+
   if LibC.pipe(stderr_pipe) != 0
     LibC.close(stdin_pipe[0])
     LibC.close(stdin_pipe[1])
@@ -213,9 +213,9 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
     STDERR.puts "Failed to create stderr pipe"
     return LibSSH::SSH_ERROR
   end
-  
+
   pid = LibC.fork
-  
+
   case pid
   when -1
     # Fork failed
@@ -224,19 +224,19 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
   when 0
     # Child process
     # Close unused pipe ends first
-    LibC.close(stdin_pipe[1])   # Close write end of stdin
-    LibC.close(stdout_pipe[0])  # Close read end of stdout
-    LibC.close(stderr_pipe[0])  # Close read end of stderr
-    
+    LibC.close(stdin_pipe[1])  # Close write end of stdin
+    LibC.close(stdout_pipe[0]) # Close read end of stdout
+    LibC.close(stderr_pipe[0]) # Close read end of stderr
+
     LibC.dup2(stdin_pipe[0], 0)  # stdin
     LibC.dup2(stdout_pipe[1], 1) # stdout
     LibC.dup2(stderr_pipe[1], 2) # stderr
-    
+
     # Close the originals after dup2
     LibC.close(stdin_pipe[0])
     LibC.close(stdout_pipe[1])
     LibC.close(stderr_pipe[1])
-    
+
     # Exec the command
     LibC.execl("/bin/sh", "sh", "-c", command, Pointer(UInt8).null)
     LibC._exit(127)
@@ -246,14 +246,14 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
     LibC.close(stdin_pipe[0])
     LibC.close(stdout_pipe[1])
     LibC.close(stderr_pipe[1])
-    
+
     cdata.pid = pid
     cdata.child_stdin = stdin_pipe[1]
     cdata.child_stdout = stdout_pipe[0]
     cdata.child_stderr = stderr_pipe[0]
-    
+
     puts "Child process started: pid=#{pid}"
-    
+
     # Flush any buffered stdin data to the child
     if cdata.stdin_buffer.size > 0
       cdata.stdin_buffer.rewind
@@ -262,7 +262,7 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
       LibC.write(cdata.child_stdin, buffered_data, buffered_data.size)
       cdata.stdin_buffer.clear
     end
-    
+
     # If EOF was already received, close stdin now
     if cdata.eof_received && cdata.child_stdin != -1
       puts "EOF was pending, closing child stdin now"
@@ -270,7 +270,7 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
       cdata.child_stdin = -1
     end
   end
-  
+
   LibSSH::SSH_OK
 end
 
@@ -278,7 +278,7 @@ end
 
 def process_stdout(fd : Int32, revents : Int16, userdata : Void*) : Int32
   channel = userdata.as(LibSSH::Channel)
-  
+
   if (revents & POLLIN) != 0
     buf = Bytes.new(BUF_SIZE)
     n = LibC.read(fd, buf, BUF_SIZE)
@@ -292,7 +292,7 @@ end
 
 def process_stderr(fd : Int32, revents : Int16, userdata : Void*) : Int32
   channel = userdata.as(LibSSH::Channel)
-  
+
   if (revents & POLLIN) != 0
     buf = Bytes.new(BUF_SIZE)
     n = LibC.read(fd, buf, BUF_SIZE)
@@ -309,10 +309,10 @@ end
 def handle_session(event : LibSSH::Event, session : LibSSH::Session)
   cdata = ChannelData.new
   sdata = SessionData.new
-  
+
   cdata_ptr = Box.box(cdata)
   sdata_ptr = Box.box(sdata)
-  
+
   # Set up channel callbacks
   channel_cb = LibSSH::ChannelCallbacksStruct.new
   channel_cb.size = sizeof(LibSSH::ChannelCallbacksStruct)
@@ -321,32 +321,32 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
   channel_cb.channel_eof_function = ->eof_function(LibSSH::Session, LibSSH::Channel, Void*).pointer
   channel_cb.channel_exec_request_function = ->exec_request(LibSSH::Session, LibSSH::Channel, UInt8*, Void*).pointer
   channel_cb.channel_shell_request_function = ->shell_request(LibSSH::Session, LibSSH::Channel, Void*).pointer
-  
+
   # Set up server callbacks
   server_cb = LibSSH::ServerCallbacksStruct.new
   server_cb.size = sizeof(LibSSH::ServerCallbacksStruct)
   server_cb.userdata = sdata_ptr
   server_cb.auth_password_function = ->auth_password(LibSSH::Session, UInt8*, UInt8*, Void*).pointer
   server_cb.channel_open_request_session_function = ->channel_open(LibSSH::Session, Void*).pointer
-  
+
   # Set auth methods - always enable both password and pubkey
   server_cb.auth_pubkey_function = ->auth_publickey(LibSSH::Session, UInt8*, LibSSH::Key, UInt8, Void*).pointer
   LibSSH.ssh_set_auth_methods(session, LibSSH::SSH_AUTH_METHOD_PASSWORD | LibSSH::SSH_AUTH_METHOD_PUBLICKEY)
-  
+
   # Register server callbacks
   LibSSH.ssh_set_server_callbacks(session, pointerof(server_cb))
-  
+
   # Handle key exchange
   if LibSSH.ssh_handle_key_exchange(session) != LibSSH::SSH_OK
     STDERR.puts "Key exchange failed: #{String.new(LibSSH.ssh_get_error(session.as(Void*)))}"
     return
   end
-  
+
   puts "Key exchange completed"
-  
+
   # Add session to event
   LibSSH.ssh_event_add_session(event, session)
-  
+
   # Wait for authentication and channel
   n = 0
   while !sdata.authenticated || sdata.channel.null?
@@ -354,28 +354,28 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
       puts "Auth timeout or too many attempts"
       return
     end
-    
+
     if LibSSH.ssh_event_dopoll(event, 100) == LibSSH::SSH_ERROR
       STDERR.puts "Event poll error: #{String.new(LibSSH.ssh_get_error(session.as(Void*)))}"
       return
     end
     n += 1
   end
-  
+
   puts "Session authenticated, channel open"
-  
+
   # Register channel callbacks
   LibSSH.ssh_set_channel_callbacks(sdata.channel, pointerof(channel_cb))
-  
+
   # Track if we got child exit status
   child_exit_status : Int32 = -1
   child_exited = false
-  
+
   # Main event loop
   loop do
     # Use short timeout to check child status regularly
     poll_result = LibSSH.ssh_event_dopoll(event, 100)
-    
+
     # Check if child has exited first (highest priority)
     if cdata.pid > 0
       status = uninitialized Int32
@@ -387,7 +387,7 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
         break
       end
     end
-    
+
     # Handle poll errors - only fatal if no child running
     if poll_result == LibSSH::SSH_ERROR
       if cdata.pid > 0
@@ -399,49 +399,49 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
         break
       end
     end
-    
+
     # Check if we need to register child fds
     if !cdata.event_registered && cdata.pid > 0
       cdata.event_registered = true
-      
+
       # Pass channel pointer as userdata
       channel_as_ptr = sdata.channel.as(Void*)
-      
+
       if cdata.child_stdout != -1
-        if LibSSH.ssh_event_add_fd(event, cdata.child_stdout, POLLIN, 
-            ->process_stdout(Int32, Int16, Void*).pointer, channel_as_ptr) != LibSSH::SSH_OK
+        if LibSSH.ssh_event_add_fd(event, cdata.child_stdout, POLLIN,
+             ->process_stdout(Int32, Int16, Void*).pointer, channel_as_ptr) != LibSSH::SSH_OK
           STDERR.puts "Failed to add stdout to event"
           LibSSH.ssh_channel_close(sdata.channel)
         end
       end
-      
+
       if cdata.child_stderr != -1
         if LibSSH.ssh_event_add_fd(event, cdata.child_stderr, POLLIN,
-            ->process_stderr(Int32, Int16, Void*).pointer, channel_as_ptr) != LibSSH::SSH_OK
+             ->process_stderr(Int32, Int16, Void*).pointer, channel_as_ptr) != LibSSH::SSH_OK
           STDERR.puts "Failed to add stderr to event"
           LibSSH.ssh_channel_close(sdata.channel)
         end
       end
     end
-    
+
     # If no child, break when channel closes
     if cdata.pid == 0
       break unless LibSSH.ssh_channel_is_open(sdata.channel) != 0
     end
   end
-  
+
   puts "Session ending"
-  
+
   # Cleanup file descriptors
   LibC.close(cdata.pty_master) if cdata.pty_master != -1
   LibC.close(cdata.child_stdin) if cdata.child_stdin != -1
   LibC.close(cdata.child_stdout) if cdata.child_stdout != -1
   LibC.close(cdata.child_stderr) if cdata.child_stderr != -1
-  
+
   # Remove fds from event
   LibSSH.ssh_event_remove_fd(event, cdata.child_stdout) if cdata.child_stdout != -1
   LibSSH.ssh_event_remove_fd(event, cdata.child_stderr) if cdata.child_stderr != -1
-  
+
   # Send exit status
   if child_exited && wifexited(child_exit_status)
     exit_code = wexitstatus(child_exit_status)
@@ -453,10 +453,10 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
       LibC.kill(cdata.pid, Signal::KILL.value)
     end
   end
-  
+
   LibSSH.ssh_channel_send_eof(sdata.channel)
   LibSSH.ssh_channel_close(sdata.channel)
-  
+
   # Wait for client to terminate
   50.times do
     break if (LibSSH.ssh_get_status(session) & SESSION_END) != 0
@@ -488,32 +488,32 @@ end
 # Parse arguments
 OptionParser.parse do |parser|
   parser.banner = "Usage: ssh_server [options] BINDADDR"
-  
+
   parser.on("-p PORT", "--port=PORT", "Port to bind (default: 2222)") do |p|
     Config.port = p
   end
-  
+
   parser.on("-k FILE", "--hostkey=FILE", "Host key file") do |f|
     Config.host_key = f
   end
-  
+
   parser.on("-u USER", "--user=USER", "Expected username") do |u|
     Config.username = u
   end
-  
+
   parser.on("-P PASS", "--pass=PASS", "Expected password") do |p|
     Config.password = p
   end
-  
+
   parser.on("-a FILE", "--authorizedkeys=FILE", "Authorized keys file for pubkey auth") do |f|
     Config.authorized_keys = f
   end
-  
+
   parser.on("-h", "--help", "Show help") do
     puts parser
     exit
   end
-  
+
   parser.unknown_args do |args|
     if args.size >= 1
       Config.bind_addr = args[0]
@@ -568,25 +568,25 @@ loop do
     STDERR.puts "Failed to allocate session"
     next
   end
-  
+
   # Accept connection
   rc = LibSSH.ssh_bind_accept(sshbind, session)
-  
+
   if rc != LibSSH::SSH_ERROR
     puts "New connection accepted"
-    
+
     # Fork to handle session
     pid = LibC.fork
-    
+
     case pid
     when 0
       # Child process - handle the session
       # Clear SIGCHLD handler
       Signal::CHLD.reset
-      
+
       # Free bind in child (allows parent restart)
       LibSSH.ssh_bind_free(sshbind)
-      
+
       # Create event and handle session
       event = LibSSH.ssh_event_new
       if !event.null?
@@ -595,18 +595,17 @@ loop do
       else
         STDERR.puts "Failed to create event"
       end
-      
+
       LibSSH.ssh_disconnect(session)
       LibSSH.ssh_free(session)
       exit 0
-      
     when -1
       STDERR.puts "Fork failed"
     end
   else
     STDERR.puts "Accept failed: #{String.new(LibSSH.ssh_get_error(sshbind.as(Void*)))}"
   end
-  
+
   # Parent cleanup
   LibSSH.ssh_disconnect(session)
   LibSSH.ssh_free(session)

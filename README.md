@@ -54,6 +54,8 @@ server = Shirk::Server.new(
   host: "0.0.0.0",
   port: 2222,
   host_key: "ssh_host_rsa_key"
+  # KEX algorithms default to include post-quantum support:
+  # ml-kem-768-sha256-x25519-sha256@libssh.org:sntrup761x25519-sha512@openssh.com:...
 )
 
 # Public key authentication - receives SHA256 fingerprint
@@ -91,6 +93,7 @@ The `on_exec` callback receives an `ExecContext` with:
 
 ### Features
 
+- **Post-quantum cryptography** - supports ML-KEM-768x25519 and SNTRUP761x25519 key exchange algorithms by default
 - **Fork model** - each connection runs in a child process for isolation
 - **Password auth** via `on_auth_password` callback
 - **Public key auth** via `on_auth_pubkey` callback (receives SHA256 fingerprint)
