@@ -66,6 +66,23 @@ server.on_exec do |ctx|
   when "fail"
     ctx.write_stderr("Command failed!\n")
     42
+  when "cat"
+    # Example: reading stdin from the client
+    # Use ctx.read() to read data sent by the client.
+    # Test with: echo "hello" | ssh -p 2222 admin@localhost cat
+    #
+    # NOTE: ctx.read() returns whatever data is available (up to max_bytes).
+    # It may return partial data or empty string. For complete input,
+    # you may need to loop until you have all the data you need.
+    input = ctx.read(4096)
+    ctx.write(input)
+    0
+  when "uppercase"
+    # Another stdin example: transform input to uppercase
+    # Test with: echo "hello world" | ssh -p 2222 admin@localhost uppercase
+    input = ctx.read(4096)
+    ctx.write(input.upcase)
+    0
   else
     ctx.write("You said: #{ctx.command}\n")
     0
