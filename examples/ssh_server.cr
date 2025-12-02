@@ -29,6 +29,9 @@ class ChannelData
   property child_stderr : Int32 = -1
   property event : LibSSH::Event = Pointer(Void).null.as(LibSSH::Event)
   property event_registered : Bool = false
+  # Buffer for data that arrives before child is spawned
+  property stdin_buffer : IO::Memory = IO::Memory.new
+  property eof_received : Bool = false
 end
 
 class SessionData
@@ -107,16 +110,55 @@ end
 def data_function(session : LibSSH::Session, channel : LibSSH::Channel, data : Void*, len : UInt32, is_stderr : Int32, userdata : Void*) : Int32
   cdata = Box(ChannelData).unbox(userdata)
   
-  return 0 if len == 0 || cdata.pid < 1
+  puts "DATA CALLBACK: len=#{len}, pid=#{cdata.pid}, stdin_fd=#{cdata.child_stdin}"
+  
+  return 0 if len == 0
+  
+  bytes = Slice.new(data.as(UInt8*), len.to_i)
+  
+  # If child not spawned yet, buffer the data
+  if cdata.pid < 1
+    cdata.stdin_buffer.write(bytes)
+    puts "Buffered #{len} bytes (total: #{cdata.stdin_buffer.size})"
+    return len.to_i
+  end
   
   # Check if child is alive
   result = LibC.kill(cdata.pid, 0)
-  return 0 if result < 0
+  if result < 0
+    puts "Child is dead, dropping data"
+    return 0
+  end
+  
+  # Check if stdin is still open
+  if cdata.child_stdin == -1
+    puts "Child stdin already closed, dropping data"
+    return 0
+  end
   
   # Write to child's stdin
-  bytes = Slice.new(data.as(UInt8*), len.to_i)
   written = LibC.write(cdata.child_stdin, bytes, len)
+  puts "Wrote #{written} bytes to child stdin"
   written.to_i
+end
+
+# Channel EOF callback - client signals end of input
+def eof_function(session : LibSSH::Session, channel : LibSSH::Channel, userdata : Void*) : Void
+  cdata = Box(ChannelData).unbox(userdata)
+  
+  puts "EOF received from client"
+  cdata.eof_received = true
+  
+  # If child is already running, close stdin now
+  if cdata.pid > 0 && cdata.child_stdin != -1
+    fd = cdata.child_stdin
+    puts "Closing child stdin (fd #{fd})"
+    result = LibC.close(fd)
+    puts "Close result: #{result}"
+    cdata.child_stdin = -1
+    puts "child_stdin is now: #{cdata.child_stdin}"
+  end
+  # Otherwise, exec_nopty will handle flushing buffer and closing stdin
 end
 
 # Exec request callback
@@ -181,9 +223,19 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
     return LibSSH::SSH_ERROR
   when 0
     # Child process
+    # Close unused pipe ends first
+    LibC.close(stdin_pipe[1])   # Close write end of stdin
+    LibC.close(stdout_pipe[0])  # Close read end of stdout
+    LibC.close(stderr_pipe[0])  # Close read end of stderr
+    
     LibC.dup2(stdin_pipe[0], 0)  # stdin
     LibC.dup2(stdout_pipe[1], 1) # stdout
     LibC.dup2(stderr_pipe[1], 2) # stderr
+    
+    # Close the originals after dup2
+    LibC.close(stdin_pipe[0])
+    LibC.close(stdout_pipe[1])
+    LibC.close(stderr_pipe[1])
     
     # Exec the command
     LibC.execl("/bin/sh", "sh", "-c", command, Pointer(UInt8).null)
@@ -201,6 +253,22 @@ def exec_nopty(command : String, cdata : ChannelData) : Int32
     cdata.child_stderr = stderr_pipe[0]
     
     puts "Child process started: pid=#{pid}"
+    
+    # Flush any buffered stdin data to the child
+    if cdata.stdin_buffer.size > 0
+      cdata.stdin_buffer.rewind
+      buffered_data = cdata.stdin_buffer.to_slice
+      puts "Flushing #{buffered_data.size} buffered bytes to child stdin"
+      LibC.write(cdata.child_stdin, buffered_data, buffered_data.size)
+      cdata.stdin_buffer.clear
+    end
+    
+    # If EOF was already received, close stdin now
+    if cdata.eof_received && cdata.child_stdin != -1
+      puts "EOF was pending, closing child stdin now"
+      LibC.close(cdata.child_stdin)
+      cdata.child_stdin = -1
+    end
   end
   
   LibSSH::SSH_OK
@@ -250,6 +318,7 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
   channel_cb.size = sizeof(LibSSH::ChannelCallbacksStruct)
   channel_cb.userdata = cdata_ptr
   channel_cb.channel_data_function = ->data_function(LibSSH::Session, LibSSH::Channel, Void*, UInt32, Int32, Void*).pointer
+  channel_cb.channel_eof_function = ->eof_function(LibSSH::Session, LibSSH::Channel, Void*).pointer
   channel_cb.channel_exec_request_function = ->exec_request(LibSSH::Session, LibSSH::Channel, UInt8*, Void*).pointer
   channel_cb.channel_shell_request_function = ->shell_request(LibSSH::Session, LibSSH::Channel, Void*).pointer
   
@@ -304,8 +373,31 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
   
   # Main event loop
   loop do
-    if LibSSH.ssh_event_dopoll(event, -1) == LibSSH::SSH_ERROR
-      LibSSH.ssh_channel_close(sdata.channel)
+    # Use short timeout to check child status regularly
+    poll_result = LibSSH.ssh_event_dopoll(event, 100)
+    
+    # Check if child has exited first (highest priority)
+    if cdata.pid > 0
+      status = uninitialized Int32
+      wait_result = LibC.waitpid(cdata.pid, pointerof(status), LibC::WNOHANG)
+      if wait_result != 0
+        child_exit_status = status
+        child_exited = true
+        puts "Child exited with status #{status}"
+        break
+      end
+    end
+    
+    # Handle poll errors - only fatal if no child running
+    if poll_result == LibSSH::SSH_ERROR
+      if cdata.pid > 0
+        # Child running, keep waiting for it
+        next
+      else
+        # No child, this is a real error
+        LibSSH.ssh_channel_close(sdata.channel)
+        break
+      end
     end
     
     # Check if we need to register child fds
@@ -332,18 +424,9 @@ def handle_session(event : LibSSH::Event, session : LibSSH::Session)
       end
     end
     
-    # Check exit conditions
-    break unless LibSSH.ssh_channel_is_open(sdata.channel) != 0
-    
-    if cdata.pid > 0
-      # Check if child has exited
-      status = uninitialized Int32
-      wait_result = LibC.waitpid(cdata.pid, pointerof(status), LibC::WNOHANG)
-      if wait_result != 0
-        child_exit_status = status
-        child_exited = true
-        break
-      end
+    # If no child, break when channel closes
+    if cdata.pid == 0
+      break unless LibSSH.ssh_channel_is_open(sdata.channel) != 0
     end
   end
   
