@@ -1,6 +1,78 @@
 # Shirk
 
-A Crystal library for building SSH servers using libssh. Provides both low-level FFI bindings and a high-level callback-based API.
+A Crystal library for building SSH servers and clients using libssh. Provides both low-level FFI bindings and high-level callback-based APIs.
+
+## High-Level Client API
+
+The `Shirk::Client` class provides a clean interface for SSH client connections:
+
+```crystal
+require "shirk"
+
+client = Shirk::Client.new("localhost", 2222, user: "admin")
+
+# Password authentication
+client.auth_password("secret")
+
+# Or public key authentication
+client.auth_publickey("~/.ssh/id_rsa")
+
+# Execute commands
+result = client.exec("whoami")
+puts result.stdout  # "admin"
+puts result.exit_code  # 0
+
+client.disconnect
+```
+
+### Authentication Methods
+
+Multiple authentication methods are supported:
+
+```crystal
+# Password authentication
+client.auth_password("secret")
+
+# Public key with file
+client.auth_publickey("/path/to/key")
+
+# Public key with base64 data  
+client.auth_publickey_base64("-----BEGIN RSA PRIVATE KEY-----...")
+
+# SSH agent
+client.auth_agent
+
+# Check available methods
+puts client.auth_methods  # ["password", "publickey"]
+```
+
+### ExecResult
+
+Command execution returns an `ExecResult` with:
+
+- `result.stdout` - standard output
+- `result.stderr` - standard error  
+- `result.exit_code` - process exit status
+- `result.success?` - true if exit code is 0
+
+### Features
+
+- **Multiple authentication methods** - Password, public key (file/base64), SSH agent
+- **Command execution** with proper stdout/stderr capture
+- **Connection management** with proper error handling
+- **Host key verification** with configurable strictness
+- **Comprehensive configuration** - Host, port, user, timeout, verbosity
+
+## Examples
+
+### Simple Client
+
+```shell
+crystal build examples/client_example.cr -o client
+./client pubkey localhost 22 admin ~/.ssh/id_rsa
+```
+
+### Simple Server
 
 ## ⚠️ Important Limitations
 
@@ -80,6 +152,59 @@ end
 server.run
 ```
 
+## High-Level Client API
+
+The `Shirk::Client` class provides a clean interface for SSH client connections:
+
+```crystal
+require "shirk"
+
+client = Shirk::Client.new("localhost", 2222, user: "admin")
+
+# Password authentication
+client.auth_password("secret")
+
+# Or public key authentication
+client.auth_publickey("~/.ssh/id_rsa")
+
+# Execute commands
+result = client.exec("whoami")
+puts result.stdout  # "admin"
+puts result.exit_code  # 0
+
+client.disconnect
+```
+
+### Authentication Methods
+
+Multiple authentication methods are supported:
+
+```crystal
+# Password authentication
+client.auth_password("secret")
+
+# Public key with file
+client.auth_publickey("/path/to/key")
+
+# Public key with base64 data
+client.auth_publickey_base64("-----BEGIN RSA PRIVATE KEY-----...")
+
+# SSH agent
+client.auth_agent
+
+# Check available methods
+puts client.auth_methods  # ["password", "publickey"]
+```
+
+### ExecResult
+
+Command execution returns an `ExecResult` with:
+
+- `result.stdout` - standard output
+- `result.stderr` - standard error  
+- `result.exit_code` - process exit status
+- `result.success?` - true if exit code is 0
+
 ### ExecContext
 
 The `on_exec` callback receives an `ExecContext` with:
@@ -118,6 +243,19 @@ Test with:
 ssh -p 2222 admin@localhost  # password: secret
 # or with Python
 python3 -c "import paramiko; c=paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy()); c.connect('localhost',2222,username='admin',password='secret'); print(c.exec_command('whoami')[1].read())"
+```
+
+### Simple Client
+
+```shell
+# Password authentication
+crystal run examples/client_example.cr -- password localhost 2222 admin secret
+
+# Public key authentication  
+crystal run examples/client_example.cr -- pubkey localhost 2222 admin ~/.ssh/id_rsa
+
+# SSH agent authentication
+crystal run examples/client_example.cr -- agent localhost 2222 admin
 ```
 
 ### Generate Host Key

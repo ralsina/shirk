@@ -123,6 +123,7 @@ lib LibSSH
   fun ssh_disconnect(session : Session) : Void
   fun ssh_handle_key_exchange(session : Session) : Int32
   fun ssh_get_error(session : Void*) : LibC::Char*
+  fun ssh_get_error_code(session : Void*) : Int32
   fun ssh_get_status(session : Session) : Int32
   fun ssh_set_auth_methods(session : Session, methods : Int32) : Int32
   fun ssh_set_server_callbacks(session : Session, cb : ServerCallbacksStruct*) : Int32
@@ -161,6 +162,84 @@ lib LibSSH
   fun ssh_get_publickey_hash(key : Key, type : Int32, hash : UInt8**, hlen : LibC::SizeT*) : Int32
   fun ssh_get_fingerprint_hash(type : Int32, hash : UInt8*, len : LibC::SizeT) : LibC::Char*
   fun ssh_clean_pubkey_hash(hash : UInt8**) : Void
+
+  # === Session options (client) ===
+  SSH_OPTIONS_HOST = 0
+  SSH_OPTIONS_PORT = 1
+  SSH_OPTIONS_PORT_STR = 2
+  SSH_OPTIONS_FD = 3  # This was missing!
+  SSH_OPTIONS_USER = 4
+  SSH_OPTIONS_SSH_DIR = 5
+  SSH_OPTIONS_IDENTITY = 6
+  SSH_OPTIONS_ADD_IDENTITY = 7
+  SSH_OPTIONS_KNOWNHOSTS = 8
+  SSH_OPTIONS_TIMEOUT = 9
+  SSH_OPTIONS_TIMEOUT_USEC = 10
+  SSH_OPTIONS_SSH1 = 11
+  SSH_OPTIONS_SSH2 = 12
+  SSH_OPTIONS_LOG_VERBOSITY = 13
+  SSH_OPTIONS_LOG_VERBOSITY_STR = 14
+  SSH_OPTIONS_STRICT_HOSTKEY_CHECKING = 17
+  SSH_OPTIONS_COMPRESSION = 18
+  SSH_OPTIONS_COMPRESSION_LEVEL = 19
+  SSH_OPTIONS_KEY_EXCHANGE = 20
+  SSH_OPTIONS_HOSTKEYS = 21
+  SSH_OPTIONS_GSSAPI_SERVER_IDENTITY = 22
+  SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS = 23
+  SSH_OPTIONS_GSSAPI_TRUSTED_DNS = 24
+
+  # === Client functions ===
+  fun ssh_options_set(session : Session, type : Int32, value : Void*) : Int32
+  fun ssh_options_parse_config(session : Session, filename : LibC::Char*) : Int32
+  fun ssh_connect(session : Session) : Int32
+  fun ssh_disconnect(session : Session) : Void
+  fun ssh_set_blocking(session : Session, blocking : Int32) : Void
+  fun ssh_is_blocking(session : Session) : Int32
+  fun ssh_get_fd(session : Session) : SocketT
+
+  # === Authentication functions ===
+  fun ssh_userauth_none(session : Session, username : LibC::Char*) : Int32
+  fun ssh_userauth_password(session : Session, username : LibC::Char*, password : LibC::Char*) : Int32
+  fun ssh_userauth_publickey(session : Session, username : LibC::Char*, privkey : Key) : Int32
+  fun ssh_userauth_try_publickey(session : Session, username : LibC::Char*, pubkey : Key) : Int32
+  fun ssh_userauth_agent(session : Session, username : LibC::Char*) : Int32
+  fun ssh_userauth_list(session : Session, username : LibC::Char*) : Int32
+
+  # === Key functions for client ===
+  fun ssh_pki_import_privkey_file(filename : LibC::Char*, passphrase : LibC::Char*, auth_fn : Void*, auth_data : Void*, privkey : Key*) : Int32
+  fun ssh_pki_import_pubkey_file(filename : LibC::Char*, pubkey : Key*) : Int32
+  fun ssh_pki_import_privkey_base64(b64 : LibC::Char*, passphrase : LibC::Char*, auth_fn : Void*, auth_data : Void*, privkey : Key*) : Int32
+  fun ssh_pki_import_pubkey_base64(b64 : LibC::Char*, type : Int32, pubkey : Key*) : Int32
+  fun ssh_pki_gen_privkey(type : Int32, bits : Int32, privkey : Key*) : Int32
+  fun ssh_pki_privkey_build_public_key(privkey : Key, pubkey : Key*) : Int32
+
+  # === Channel functions (client) ===
+  fun ssh_channel_new(session : Session) : Channel
+  fun ssh_channel_open_session(channel : Channel) : Int32
+  fun ssh_channel_request_exec(channel : Channel, cmd : LibC::Char*) : Int32
+  fun ssh_channel_request_pty(channel : Channel, term : LibC::Char*) : Int32
+  fun ssh_channel_request_shell(channel : Channel) : Int32
+  fun ssh_channel_request_subsystem(channel : Channel, subsystem : LibC::Char*) : Int32
+  fun ssh_channel_change_pty_size(channel : Channel, cols : Int32, rows : Int32) : Int32
+
+  # === Known hosts functions ===
+  SSH_KNOWNHOSTS_OK = 0
+  SSH_KNOWNHOSTS_CHANGED = 1
+  SSH_KNOWNHOSTS_NOT_FOUND = 2
+  SSH_KNOWNHOSTS_UNKNOWN = 3
+  SSH_KNOWNHOSTS_ERROR = 4
+
+  fun ssh_knownhosts_read_file(session : Session, filename : LibC::Char*) : Int32
+  fun ssh_knownhosts_write_file(session : Session, filename : LibC::Char*) : Int32
+  fun ssh_knownhosts_check(session : Session, hostname : LibC::Char*) : Int32
+
+  # === Channel exit status ===
+  fun ssh_channel_get_exit_status(channel : Channel) : Int32
+
+  # === SFTP functions ===
+  fun ssh_sftp_new(session : Session) : Void*
+  fun ssh_sftp_init(sftp : Void*) : Int32
+  fun ssh_sftp_free(sftp : Void*) : Void
 end
 
 # Poll event flags (from poll.h)
